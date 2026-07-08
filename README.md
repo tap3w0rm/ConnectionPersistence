@@ -44,6 +44,7 @@ Each adapter gets its own log file based on the sanitized adapter name, so the r
 - [Adapter Monitoring](docs/adapter-monitoring.md): Physical adapter filtering and Ethernet link detection.
 - [Alerts And Sounds](docs/alerts-and-sounds.md): Popup, fullscreen, and WAV sound behavior.
 - [Prototype Spike Plan](docs/spike-plan.md): Technical proof plan before full implementation.
+- [Implementation Spike Findings](docs/implementation-spike-findings.md): Non-code findings from early implementation exploration.
 - [Build And Release](docs/build-and-release.md): Expected build, packaging, and release direction.
 
 ## First Engineering Step
