@@ -2,7 +2,7 @@
 
 ## Purpose
 
-ConnectionPersistence is a Windows-only Rust tray application that keeps a selected Windows built-in VPN connection alive whenever a real physical Ethernet link is present.
+ConnectionPersistence is a Windows-only Rust tray application that keeps a primary Windows built-in VPN connection alive whenever a real physical Ethernet link is present, with optional failover to a configured backup Windows built-in VPN profile.
 
 The app is intended to be quiet most of the time. It lives in the system tray, watches network state, reconnects the configured VPN aggressively when needed, alerts without disrupting fullscreen/game sessions, and writes verbose CSV logs for later review.
 
@@ -10,9 +10,11 @@ The core product goal is reliability:
 
 - Detect physical Ethernet link changes quickly.
 - Ignore virtual adapters completely.
-- Detect when the selected Windows VPN drops or is not routing correctly.
-- Reconnect the selected VPN with no retry limit.
-- Prove that traffic to a configured route target uses the VPN interface.
+- Detect when the primary or active backup Windows VPN drops or is not routing correctly.
+- Reconnect the primary VPN with no retry limit while Ethernet is present.
+- Fail over to a backup VPN after a configurable primary retry threshold.
+- Probe the primary VPN endpoint while backup is active and switch back when primary is connectable again.
+- Prove that traffic to a configured route target uses the active VPN interface.
 - Record exactly what happened, when it happened, and how many attempts recovery required.
 
 ## Product Name
@@ -81,7 +83,7 @@ Open Configuration
 Tray menu behavior:
 
 - `Start Watching` enables network monitoring and persistence logic.
-- `Stop Watching` cancels monitoring and any active reconnect loop.
+- `Stop Watching` cancels monitoring and any active reconnect/failover loop.
 - `Open Configuration` shows the configuration window.
 - `Exit` cancels active work, flushes logs/config as needed, removes the tray icon, and exits.
 
@@ -97,7 +99,7 @@ The tray tooltip should expose current state, for example:
 
 ```text
 ConnectionPersistence - Watching
-ConnectionPersistence - Reconnecting Work VPN, attempt 12
+ConnectionPersistence - Reconnecting primary VPN, attempt 12
 ConnectionPersistence - Ethernet unavailable
 ConnectionPersistence - Stopped
 ```
@@ -152,7 +154,12 @@ Theme applies to:
 Controls:
 
 - Enable connection persistence checkbox.
-- Dropdown of Windows built-in VPN profiles.
+- Primary VPN profile dropdown.
+- Backup VPN profile dropdown.
+- Minimum primary retries before backup failover.
+- Maximum backup retries before fallback behavior.
+- Primary endpoint host and port.
+- Primary endpoint probe interval.
 - Route test target field.
 - Connect and Test button.
 
@@ -161,11 +168,16 @@ Defaults:
 ```text
 enabled = true after first saved config
 route_test_target = 8.8.8.8
+primary_min_retries_before_failover = 10
+backup_max_retries_before_primary_fallback = 10
+primary_probe_host = ""
+primary_probe_port = 443
+primary_probe_interval_seconds = 60
 ```
 
-First run requires explicit Save. Persistence should not start until a VPN profile has been selected and the configuration has been saved.
+First run requires explicit Save. Persistence should not start until a primary VPN profile has been selected and the configuration has been saved.
 
-If no VPN is selected:
+If no primary VPN is selected:
 
 - monitoring may run,
 - network changes may be logged/alerted,
@@ -181,10 +193,10 @@ Connect and Test
 
 Expected behavior:
 
-1. Confirm selected VPN profile still exists.
+1. Confirm selected primary VPN profile still exists.
 2. Attempt to connect it using the normal app VPN path.
-3. Confirm Windows reports the selected VPN connected.
-4. Resolve the VPN interface.
+3. Confirm Windows reports the primary VPN connected.
+4. Resolve the primary VPN interface.
 5. Verify the configured route target routes through that VPN interface.
 6. Show pass/fail details in the config window.
 7. Write verbose CSV events.
@@ -295,6 +307,8 @@ restored: show recovery summary
 Final recovery alert should include:
 
 - VPN name,
+- active VPN role, primary or backup,
+- failover/switchback state if applicable,
 - time VPN went down,
 - time VPN came back up,
 - outage duration,
@@ -310,7 +324,9 @@ Support distinct sounds for:
 - connection up,
 - connection down,
 - VPN went down,
-- VPN came back up.
+- VPN came back up,
+- VPN failover to backup,
+- VPN switchback to primary.
 
 Default:
 
@@ -441,10 +457,10 @@ Do not use `rasdial.exe` as the primary implementation.
 
 ### VPN Health
 
-VPN is healthy only when both are true:
+The active VPN is healthy only when both are true:
 
-1. Windows/RAS reports the selected VPN is connected.
-2. The configured route target routes through the selected VPN interface.
+1. Windows/RAS reports the active VPN is connected.
+2. The configured route target routes through the active VPN interface.
 
 Default route target:
 
@@ -454,7 +470,7 @@ Default route target:
 
 Ping success alone is not enough.
 
-The route to the target must specifically use the VPN interface.
+The route to the target must specifically use the active VPN interface.
 
 ### Route Validation
 
@@ -469,11 +485,11 @@ GetBestRoute2
 Validation flow:
 
 ```text
-selected VPN profile
+active managed VPN profile
   -> active RAS connection
   -> projection/interface details
   -> route lookup for configured target
-  -> compare returned route interface to selected VPN interface
+  -> compare returned route interface to active VPN interface
 ```
 
 `RasGetProjectionInfoEx` is likely the cleanest RAS-side API for PPP/IKEv2 projection information.
@@ -483,21 +499,81 @@ If Windows reports the VPN connected but route validation fails:
 ```text
 treat VPN as unhealthy
 log route failure
-disconnect/reset selected VPN if needed
-reconnect selected VPN
+disconnect/reset active managed VPN if needed
+reconnect active managed VPN according to primary/backup state
 increment attempt count
 ```
 
+### Failure Classification
+
+Connection failures should preserve as much diagnostic detail as Windows provides.
+
+At minimum, classify:
+
+- timeout,
+- unreachable endpoint,
+- authentication failure,
+- DNS/name resolution failure,
+- route validation failure,
+- user/credential prompt required,
+- unknown RAS error.
+
+Timeout and unreachable failures are especially important. If the primary VPN fails by timeout or unreachable status but the backup VPN connects successfully, the app should continue using the backup and periodically probe the primary endpoint instead of assuming the primary has recovered.
+
+### Primary And Backup VPN Behavior
+
+The primary VPN is preferred. The backup VPN is a continuity path.
+
+Configuration includes:
+
+- primary VPN profile,
+- backup VPN profile,
+- minimum primary retry count before backup failover,
+- maximum backup retry count before fallback behavior,
+- primary endpoint host,
+- primary endpoint port,
+- primary endpoint probe interval.
+
+Primary failure flow:
+
+```text
+primary VPN unhealthy
+  -> retry primary one attempt at a time
+  -> classify each failure
+  -> once minimum primary retry count is reached, attempt backup VPN
+```
+
+Backup active flow:
+
+```text
+backup VPN healthy
+  -> remain on backup
+  -> periodically probe primary endpoint host and port
+  -> if primary endpoint is connectable, attempt controlled switchback
+```
+
+Switchback flow:
+
+```text
+primary endpoint probe succeeds
+  -> attempt primary connection
+  -> validate route target through primary interface
+  -> if primary is healthy, return to primary
+  -> if primary fails, keep backup active and continue probing
+```
+
+The primary endpoint probe is a lightweight host/port check. It is not a VPN authentication attempt.
+
 ### Reconnect Loop
 
-Only the selected default VPN is forcefully reconnected.
+Only configured managed VPN profiles are forcefully reconnected.
 
 Manual disconnect is overridden if:
 
 - watching is enabled,
 - connection persistence is enabled,
 - Ethernet link is present,
-- selected VPN is unhealthy.
+- active managed VPN is unhealthy.
 
 Reconnect rules:
 
@@ -508,6 +584,8 @@ no retry limit
 immediate retry after each completed failure
 pause when Ethernet link disappears
 resume immediately when Ethernet link returns
+fail over to backup only after the primary minimum retry threshold
+attempt primary switchback only after primary endpoint probe succeeds
 ```
 
 No startup delay.
@@ -527,15 +605,20 @@ Watching enabled + no physical Ethernet link:
   continue monitoring adapters
   log state change
 
-Watching enabled + physical Ethernet link present + VPN healthy:
-  normal healthy state
+Watching enabled + physical Ethernet link present + primary VPN healthy:
+  normal primary state
 
-Watching enabled + physical Ethernet link present + selected VPN unhealthy:
-  reconnect selected VPN immediately
-  retry until healthy
+Watching enabled + physical Ethernet link present + primary VPN unhealthy:
+  retry primary until minimum failover retry count is reached
+
+Watching enabled + physical Ethernet link present + primary still failing:
+  attempt backup VPN
+
+Watching enabled + physical Ethernet link present + backup VPN healthy:
+  stay on backup and periodically probe primary endpoint
 
 Ethernet returns:
-  immediately resume VPN persistence if selected VPN is unhealthy
+  immediately resume VPN persistence if active managed VPN is unhealthy
 ```
 
 ## Network Adapter Monitoring
@@ -727,7 +810,9 @@ Sound events:
 - connection up,
 - connection down,
 - VPN down,
-- VPN restored.
+- VPN restored,
+- VPN failover,
+- VPN switchback.
 
 Do not make sound playback block the reconnect engine.
 
@@ -767,6 +852,12 @@ Main event log candidate columns:
 timestamp,event_type,severity,message,vpn_name,uplink_type,uplink_name,adapter_id,route_target,down_time,up_time,duration_seconds,attempt,status,last_error,details
 ```
 
+Additional VPN failover fields may be added as explicit columns or stored in `details`:
+
+```csv
+active_vpn_role,primary_vpn_name,backup_vpn_name,failure_classification,ras_error_code,probe_host,probe_port,probe_result,failover_reason,switchback_reason
+```
+
 Event types should include at least:
 
 - `APP_STARTED`
@@ -789,6 +880,16 @@ Event types should include at least:
 - `VPN_RECONNECT_FAILED`
 - `VPN_RESTORED`
 - `VPN_RESET_REQUESTED`
+- `VPN_PRIMARY_RETRY_THRESHOLD_REACHED`
+- `VPN_FAILOVER_STARTED`
+- `VPN_FAILOVER_SUCCEEDED`
+- `VPN_FAILOVER_FAILED`
+- `VPN_PRIMARY_PROBE_STARTED`
+- `VPN_PRIMARY_PROBE_SUCCEEDED`
+- `VPN_PRIMARY_PROBE_FAILED`
+- `VPN_SWITCHBACK_STARTED`
+- `VPN_SWITCHBACK_SUCCEEDED`
+- `VPN_SWITCHBACK_FAILED`
 - `ALERT_SHOWN`
 - `ALERT_SUPPRESSED_FULLSCREEN`
 - `ALERT_QUEUED`
@@ -800,6 +901,16 @@ Event types should include at least:
 - `ERROR`
 
 Reconnect attempts should be logged individually.
+
+Failure classifications should be logged whenever available:
+
+- timeout,
+- unreachable endpoint,
+- authentication failure,
+- DNS/name resolution failure,
+- route validation failure,
+- user/credential prompt required,
+- unknown RAS error.
 
 Popups should be less noisy than logs.
 
@@ -962,7 +1073,7 @@ This supports physical Ethernet filtering and bad-counter logging without packet
 
 ### Route Validation
 
-`GetBestRoute2` returns the best route for a destination. Use it to validate the configured route target uses the selected VPN interface.
+`GetBestRoute2` returns the best route for a destination. Use it to validate the configured route target uses the active VPN interface.
 
 ### Fullscreen
 
@@ -982,7 +1093,7 @@ Highest risk first:
 
 1. Tray + egui hidden-window lifecycle.
 2. Non-activating upper-right alert windows.
-3. Mapping selected RAS VPN to exact interface used for route validation.
+3. Mapping the active managed RAS VPN to the exact interface used for route validation.
 4. Physical/virtual adapter filtering across odd drivers.
 5. Fullscreen/game suppression heuristics.
 6. No-admin verification across all APIs.
@@ -1004,9 +1115,11 @@ Spike goals:
 8. Detect Ethernet link present.
 9. If a VPN is active, inspect RAS status/projection.
 10. Run `GetBestRoute2` against `8.8.8.8`.
-11. Show one upper-right test alert without stealing focus.
-12. Play default alert sound.
-13. Write one CSV event log row.
+11. Capture and classify at least timeout and unreachable VPN connection failures.
+12. Probe a configured primary VPN endpoint host and port.
+13. Show one upper-right test alert without stealing focus.
+14. Play default alert sound.
+15. Write one CSV event log row.
 
 Spike pass criteria:
 
@@ -1017,6 +1130,8 @@ Spike pass criteria:
 - physical Ethernet adapter list is sane,
 - virtual adapters are excluded,
 - route lookup returns usable interface data,
+- VPN connection failures preserve RAS error details,
+- primary endpoint host/port probe produces reachable, timeout, or unreachable status,
 - alert popup does not steal focus in normal desktop use,
 - logs are written to expected local app data path.
 
@@ -1045,12 +1160,17 @@ MVP includes:
 
 - tray app,
 - first-run config,
-- VPN dropdown,
+- primary VPN dropdown,
+- backup VPN dropdown,
+- primary retry threshold before backup failover,
+- primary endpoint host/port probe settings,
 - Save-required first-run behavior,
 - start/stop watching,
 - physical Ethernet detection,
 - virtual adapter exclusion,
-- selected VPN reconnect loop,
+- primary VPN reconnect loop,
+- backup VPN failover loop,
+- controlled switchback to primary,
 - route validation to configured target,
 - reconnect attempt counting,
 - upper-right alert popups when safe,
@@ -1077,8 +1197,14 @@ MVP excludes:
 - Windows only.
 - Use Windows built-in VPN only.
 - Use native Windows connection methods.
-- VPN health requires route to `8.8.8.8` through VPN interface.
+- VPN health requires route to `8.8.8.8` through the active VPN interface.
 - Route target is configurable, default `8.8.8.8`.
+- Primary and backup VPN profiles are configurable.
+- Primary retry threshold before backup failover is configurable.
+- Backup retry threshold/fallback behavior is configurable.
+- Primary endpoint host, port, and probe interval are configurable.
+- Timeout and unreachable VPN failures must be classified when possible.
+- While backup is active, primary endpoint probing determines when switchback should be attempted.
 - Any physical Ethernet adapter counts.
 - Virtual adapters never count and never alert.
 - Wi-Fi is optional by checkbox.
@@ -1086,7 +1212,7 @@ MVP excludes:
 - App starts with Windows.
 - Retry as fast as safely possible.
 - One active reconnect attempt at a time.
-- VPN is restored as soon as connected and route validation passes.
+- VPN is restored as soon as the active profile is connected and route validation passes.
 - Recovery alert should include detailed information.
 - Verbose CSV log.
 - Log retention 30 to 420 days in 30-day increments, default 30.

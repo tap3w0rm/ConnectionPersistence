@@ -18,10 +18,17 @@ Primary APIs:
 Purpose:
 
 - list Windows built-in VPN profiles,
-- connect the selected profile,
+- connect primary and backup profiles,
 - inspect active RAS connections,
 - retrieve connection/projection state,
-- reset only the selected VPN when route validation fails.
+- reset only the active managed VPN when route validation fails,
+- collect RAS error codes for failure classification.
+
+## Primary Endpoint Probe
+
+Use normal Windows socket APIs through Rust networking or WinSock-compatible calls for the primary endpoint host/port probe.
+
+The probe is a lightweight TCP connect check to determine whether the primary VPN endpoint appears reachable while the backup VPN is active. It is not a VPN authentication attempt.
 
 ## Adapters And Interface State
 
@@ -50,7 +57,7 @@ Use:
 
 - `GetBestRoute2`
 
-The app must prove the configured route target, default `8.8.8.8`, routes through the selected VPN interface.
+The app must prove the configured route target, default `8.8.8.8`, routes through the active VPN interface.
 
 Ping alone is not enough.
 
@@ -81,4 +88,3 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 ```
 
 This avoids requiring admin elevation.
-

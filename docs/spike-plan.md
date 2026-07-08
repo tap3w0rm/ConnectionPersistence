@@ -14,9 +14,11 @@ Before full implementation, build a narrow technical spike.
 8. Detect Ethernet link present.
 9. Inspect active RAS VPN status/projection.
 10. Run `GetBestRoute2` for `8.8.8.8`.
-11. Show one upper-right alert without stealing focus.
-12. Play one default alert sound.
-13. Write one CSV event row.
+11. Capture and classify at least timeout and unreachable VPN connection failures.
+12. Probe a configured primary VPN endpoint host and port.
+13. Show one upper-right alert without stealing focus.
+14. Play one default alert sound.
+15. Write one CSV event row.
 
 ## Pass Criteria
 
@@ -28,6 +30,8 @@ Before full implementation, build a narrow technical spike.
 - Physical adapter list is sane.
 - Virtual adapters are excluded.
 - Route lookup returns usable interface data.
+- VPN connection failures preserve RAS error details.
+- Primary endpoint host/port probe produces reachable, timeout, or unreachable status.
 - Alert does not steal focus in normal desktop use.
 - CSV log lands under `%LOCALAPPDATA%`.
 
@@ -51,4 +55,3 @@ If native lifecycle remains a blocker:
 ```text
 consider Tauri
 ```
-

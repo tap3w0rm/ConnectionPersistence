@@ -45,7 +45,13 @@ Expected top-level settings:
   "theme": "system",
   "watching_enabled": true,
   "persistence_enabled": true,
-  "selected_vpn_profile": "",
+  "primary_vpn_profile": "",
+  "backup_vpn_profile": "",
+  "primary_min_retries_before_failover": 10,
+  "backup_max_retries_before_primary_fallback": 10,
+  "primary_probe_host": "",
+  "primary_probe_port": 443,
+  "primary_probe_interval_seconds": 60,
   "route_test_target": "8.8.8.8",
   "include_wifi_as_uplink": false,
   "managed_vpn_support": false,
@@ -66,4 +72,3 @@ Expected top-level settings:
 ```
 
 The final schema may evolve, but these are the required concepts.
-
