@@ -13,10 +13,13 @@ Confirmed direction:
 - A compact panel-based layout works for the planned configuration surface.
 - A local-only release build of the initial native configuration app completed successfully.
 - The local-only release executable launched successfully on Windows.
+- A local-only tray integration build completed successfully with `tray-icon` and `eframe` in the same process.
+- The local-only tray-enabled executable launched and stayed alive as a background process.
 
 Open item:
 
-- Tray-resident lifecycle still needs a dedicated spike before implementation is accepted.
+- Tray menu command behavior still needs manual UI verification from the Windows notification area.
+- Close-to-hide behavior still needs manual UI verification.
 
 ## Configuration And Logging
 
