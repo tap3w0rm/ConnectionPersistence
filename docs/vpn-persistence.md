@@ -12,9 +12,85 @@ Configuration includes:
 - maximum backup retry count before attempting fallback behavior,
 - primary endpoint host,
 - primary endpoint port,
+- primary endpoint probe protocol,
 - primary endpoint probe interval.
 
 The primary profile remains preferred. The backup profile is a continuity path when the primary repeatedly fails.
+
+## VPN Profile Metadata
+
+The app should read Windows built-in VPN profile metadata from RAS instead of requiring duplicate manual entry.
+
+Native metadata source:
+
+```text
+RasEnumEntriesW
+  -> profile names
+
+RasGetEntryPropertiesW
+  -> RASENTRYW
+```
+
+Relevant `RASENTRYW` fields:
+
+```text
+szLocalPhoneNumber
+dwType
+dwVpnStrategy
+guidId
+dwRedialCount
+```
+
+Usage:
+
+- `dwType` identifies whether an entry is a VPN entry.
+- `szLocalPhoneNumber` is the VPN server DNS name or IP address for VPN profiles and should be used as the default primary probe host.
+- `dwVpnStrategy` describes the VPN strategy/type and should be used to derive a default probe method.
+- `guidId` provides a stable profile identifier for logs/config correlation.
+- `dwRedialCount` is useful diagnostic context but does not replace app-managed retry policy.
+
+PowerShell `Get-VpnConnection` may be used for diagnostics because it exposes similar high-level fields such as `ServerAddress` and `TunnelType`, but the application should use RAS APIs directly.
+
+## Derived Probe Defaults
+
+Endpoint probe defaults should be derived from `RASENTRYW.dwVpnStrategy` when possible.
+
+```text
+VS_SstpOnly / VS_SstpFirst:
+  host = szLocalPhoneNumber
+  protocol = tcp
+  port = 443
+  confidence = strong
+
+VS_PptpOnly / VS_PptpFirst:
+  host = szLocalPhoneNumber
+  protocol = tcp
+  port = 1723
+  confidence = partial
+  limitation = GRE protocol 47 is also required and is not proven by TCP 1723
+
+VS_Ikev2Only / VS_Ikev2First:
+  host = szLocalPhoneNumber
+  protocol = udp
+  ports = 500, 4500
+  confidence = weak
+  limitation = UDP probing is not definitive
+
+VS_L2tpOnly / VS_L2tpFirst:
+  host = szLocalPhoneNumber
+  protocol = udp
+  ports = 500, 4500, 1701
+  confidence = weak
+  limitation = IPsec/ESP behavior is not proven by UDP socket behavior
+
+VS_Default / Automatic:
+  host = szLocalPhoneNumber
+  protocol = inferred when possible
+  confidence = variable
+  limitation = Windows may try multiple protocols or alter strategy after success/failure
+```
+
+Manual probe override must remain available because Windows profiles do not always expose a clean custom probe port, and protocol-derived UDP probes are only reachability signals.
 
 ## Health Definition
 
@@ -107,6 +183,7 @@ Example:
 ```text
 primary_vpn_host = vpn.example.com
 primary_vpn_port = 443
+primary_vpn_probe_protocol = tcp
 probe_interval_seconds = 60
 ```
 
@@ -115,12 +192,23 @@ Probe behavior:
 ```text
 backup VPN active
   -> wait configured interval
-  -> attempt TCP connect to primary host:port
+  -> run the configured or derived primary endpoint probe
   -> if connectable, attempt controlled switchback to primary
   -> if primary switchback fails, keep backup active and continue probing
 ```
 
 The probe must not disconnect a healthy backup VPN until primary switchback is actually being attempted.
+
+Probe result states should include:
+
+- reachable,
+- timeout,
+- unreachable,
+- DNS failure,
+- unsupported probe type,
+- inconclusive.
+
+For UDP-based VPN types, `reachable` should be treated as a weak signal unless a separate TCP health-check endpoint is configured.
 
 ## Recovery Summary
 

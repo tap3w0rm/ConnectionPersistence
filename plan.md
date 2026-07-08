@@ -170,7 +170,9 @@ enabled = true after first saved config
 route_test_target = 8.8.8.8
 primary_min_retries_before_failover = 10
 backup_max_retries_before_primary_fallback = 10
+primary_probe_source = auto
 primary_probe_host = ""
+primary_probe_protocol = auto
 primary_probe_port = 443
 primary_probe_interval_seconds = 60
 ```
@@ -433,6 +435,81 @@ Likely APIs:
 The UI dropdown should show only Windows built-in VPN profiles, not arbitrary virtual adapters.
 
 PowerShell `Get-VpnConnection` may be used only as a diagnostic fallback during development.
+
+### VPN Profile Metadata
+
+The app should read probe-relevant VPN metadata from RAS profile properties.
+
+Native metadata flow:
+
+```text
+RasEnumEntriesW
+  -> profile names
+
+RasGetEntryPropertiesW
+  -> RASENTRYW
+```
+
+Relevant `RASENTRYW` fields:
+
+```text
+szLocalPhoneNumber
+dwType
+dwVpnStrategy
+guidId
+dwRedialCount
+```
+
+Usage:
+
+- `dwType` filters VPN entries.
+- `szLocalPhoneNumber` provides the VPN server DNS name or IP address and should be used as the default probe host.
+- `dwVpnStrategy` describes the VPN strategy/type and should be used to derive the default probe protocol and port.
+- `guidId` is used as a stable profile identifier in logs/config correlation.
+- `dwRedialCount` is logged as Windows profile context but does not replace app-managed retry policy.
+
+PowerShell `Get-VpnConnection` exposes high-level diagnostic fields such as `ServerAddress` and `TunnelType`, but the application should use RAS APIs directly.
+
+### Derived Probe Defaults
+
+Endpoint probe defaults should be derived from `RASENTRYW.dwVpnStrategy` when possible.
+
+```text
+VS_SstpOnly / VS_SstpFirst:
+  host = szLocalPhoneNumber
+  protocol = tcp
+  port = 443
+  confidence = strong
+
+VS_PptpOnly / VS_PptpFirst:
+  host = szLocalPhoneNumber
+  protocol = tcp
+  port = 1723
+  confidence = partial
+  limitation = GRE protocol 47 is also required and is not proven by TCP 1723
+
+VS_Ikev2Only / VS_Ikev2First:
+  host = szLocalPhoneNumber
+  protocol = udp
+  ports = 500, 4500
+  confidence = weak
+  limitation = UDP probing is not definitive
+
+VS_L2tpOnly / VS_L2tpFirst:
+  host = szLocalPhoneNumber
+  protocol = udp
+  ports = 500, 4500, 1701
+  confidence = weak
+  limitation = IPsec/ESP behavior is not proven by UDP socket behavior
+
+VS_Default / Automatic:
+  host = szLocalPhoneNumber
+  protocol = inferred when possible
+  confidence = variable
+  limitation = Windows may try multiple protocols or alter strategy after success/failure
+```
+
+Manual probe override must remain available for host, protocol, port, and interval.
 
 ### VPN Connection
 
@@ -1109,17 +1186,19 @@ Spike goals:
 2. Show/hide egui config window from tray double-click/menu.
 3. Keep process alive when config window closes.
 4. Enumerate Windows built-in VPN profiles.
-5. Enumerate physical Ethernet adapters.
-6. Exclude obvious virtual adapters.
-7. Read `MIB_IF_ROW2` counters.
-8. Detect Ethernet link present.
-9. If a VPN is active, inspect RAS status/projection.
-10. Run `GetBestRoute2` against `8.8.8.8`.
-11. Capture and classify at least timeout and unreachable VPN connection failures.
-12. Probe a configured primary VPN endpoint host and port.
-13. Show one upper-right test alert without stealing focus.
-14. Play default alert sound.
-15. Write one CSV event log row.
+5. Read VPN server address and strategy from RAS profile properties.
+6. Derive default endpoint probe protocol/port from VPN strategy.
+7. Enumerate physical Ethernet adapters.
+8. Exclude obvious virtual adapters.
+9. Read `MIB_IF_ROW2` counters.
+10. Detect Ethernet link present.
+11. If a VPN is active, inspect RAS status/projection.
+12. Run `GetBestRoute2` against `8.8.8.8`.
+13. Capture and classify at least timeout and unreachable VPN connection failures.
+14. Probe a configured or derived primary VPN endpoint host and port.
+15. Show one upper-right test alert without stealing focus.
+16. Play default alert sound.
+17. Write one CSV event log row.
 
 Spike pass criteria:
 
@@ -1127,6 +1206,8 @@ Spike pass criteria:
 - config window opens/closes without exiting app,
 - no admin prompt,
 - VPN profiles appear,
+- VPN profile server address and strategy can be read from RAS properties,
+- endpoint probe defaults can be derived or marked as requiring manual override,
 - physical Ethernet adapter list is sane,
 - virtual adapters are excluded,
 - route lookup returns usable interface data,

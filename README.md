@@ -14,6 +14,8 @@ ConnectionPersistence exists to keep trying. If the primary VPN is down or conne
 
 If the primary VPN continues failing after the configured minimum retry count, the app can fail over to a configured backup VPN profile. While the backup is active, the app periodically probes the primary VPN endpoint host and port. When the primary endpoint becomes reachable again, the app attempts a controlled switchback to the primary VPN.
 
+Primary endpoint probe defaults should be derived from the Windows VPN profile when possible. The app should read the RAS profile server address and VPN strategy, use the server address as the default probe host, infer a protocol-aware default port, and allow manual override when the inferred probe is weak or incomplete.
+
 Failure reasons should be recorded from Windows/RAS and app-level checks. Timeout and unreachable failures are especially important because a timeout against the primary followed by a successful backup connection indicates that the primary endpoint may be unavailable while general network/VPN capability still works.
 
 ## Adapter Error Monitoring
@@ -51,13 +53,15 @@ Build a narrow spike before the full app:
 1. Start hidden in the tray.
 2. Open and hide an egui config window from tray actions.
 3. Enumerate Windows built-in VPN profiles.
-4. Enumerate physical Ethernet adapters and exclude virtual adapters.
-5. Read adapter counters.
-6. Validate route lookup for `8.8.8.8`.
-7. Classify at least timeout and unreachable VPN connection failures.
-8. Probe a configured primary VPN endpoint host and port.
-9. Show a safe upper-right test alert or fall back to raw Win32.
-10. Write one CSV event row.
+4. Read VPN server address and strategy from RAS profile properties.
+5. Derive a default endpoint probe from the VPN strategy.
+6. Enumerate physical Ethernet adapters and exclude virtual adapters.
+7. Read adapter counters.
+8. Validate route lookup for `8.8.8.8`.
+9. Classify at least timeout and unreachable VPN connection failures.
+10. Probe a configured or derived primary VPN endpoint host and port.
+11. Show a safe upper-right test alert or fall back to raw Win32.
+12. Write one CSV event row.
 
 ## Current Status
 
