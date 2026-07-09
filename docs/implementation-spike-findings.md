@@ -76,6 +76,13 @@ Production implementation should use:
 
 Virtual adapter filtering must remain explicit and conservative.
 
+PowerShell diagnostics showed that some adapter fields are serialized as numeric enum values rather than strings. For example, `Get-NetAdapter -Physical` can return `MediaConnectionState` as `1` or `2`. Diagnostic parsers and production adapters should normalize both numeric and string representations before presenting state or writing logs.
+
+Observed diagnostic mapping:
+
+- `MediaConnectionState = 1`: connected.
+- `MediaConnectionState = 2`: disconnected.
+
 ## Remaining Required Spikes
 
 These items are not yet proven:
