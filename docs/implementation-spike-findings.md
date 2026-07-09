@@ -83,6 +83,27 @@ Observed diagnostic mapping:
 - `MediaConnectionState = 1`: connected.
 - `MediaConnectionState = 2`: disconnected.
 
+The local-only implementation now verifies that adapter discovery can be performed directly through `GetIfTable2` without PowerShell. The API returns a `MIB_IF_TABLE2` containing `MIB_IF_ROW2` rows and the allocated table must be released with `FreeMibTable`.
+
+Verified `MIB_IF_ROW2` fields for this project:
+
+- `Alias`
+- `Description`
+- `InterfaceIndex`
+- `Type`
+- `PhysicalAddressLength`
+- `OperStatus`
+- `MediaConnectState`
+- `TransmitLinkSpeed`
+- `ReceiveLinkSpeed`
+- `InErrors`
+- `OutErrors`
+- `InDiscards`
+- `OutDiscards`
+- `InUnknownProtos`
+
+The local-only filter currently uses `Type == IF_TYPE_ETHERNET_CSMACD`, nonzero `PhysicalAddressLength`, and the existing virtual-name exclusion list. Further filtering should evaluate `InterfaceAndOperStatusFlags.ConnectorPresent` and related flags before finalizing the production physical-adapter rule.
+
 ## Remaining Required Spikes
 
 These items are not yet proven:
