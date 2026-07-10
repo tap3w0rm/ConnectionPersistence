@@ -38,6 +38,15 @@ The configuration schema needs explicit probe metadata fields:
 
 The local-only build verified that the config/control surface can represent the primary/backup VPN settings, probe settings, route target, theme, alerts, sounds, and retention controls in one compact utility window.
 
+The primary and backup VPN selectors should enforce dependency rules in the UI:
+
+- primary VPN selector is always enabled,
+- backup VPN selector is disabled until a primary VPN is selected,
+- backup VPN options exclude the currently selected primary VPN,
+- changing the primary VPN should refresh backup options,
+- if the backup selection conflicts with the new primary selection, backup must be cleared,
+- clearing primary should disable and clear backup.
+
 ## VPN Profile Discovery
 
 PowerShell can expose high-level VPN profile fields for diagnostics, including profile name, server address, tunnel type, connection status, and GUID.
