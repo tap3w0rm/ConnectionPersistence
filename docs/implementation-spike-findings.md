@@ -46,6 +46,8 @@ The primary and backup VPN selectors should enforce dependency rules in the UI:
 - changing the primary VPN should refresh backup options,
 - if the backup selection conflicts with the new primary selection, backup must be cleared,
 - clearing primary should disable and clear backup.
+- the selector area needs an explicit title and empty-state message so it is obvious when Windows reports zero VPN profiles,
+- the secondary selector needs visible helper text when disabled.
 
 ## VPN Profile Discovery
 
